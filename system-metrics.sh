@@ -12,7 +12,7 @@ then
 fi
 
 Path="$1"
-Service="SMSGate2"
+Service="service-name"
 
 Uptime=$(awk '{printf "Uptime_days=%s", $1/86400}' /proc/uptime)
 Load=$(awk '{printf "Load_avg_1min=%.2f", $1}' /proc/loadavg)
