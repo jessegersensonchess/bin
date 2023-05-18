@@ -1,4 +1,5 @@
 #!/bin/bash
+# pre-commit for a terraform repository
 
 echo "START: .git/hooks/pre-commit"
 #### exit if nothing changed ####
