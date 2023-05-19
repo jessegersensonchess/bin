@@ -1,37 +1,57 @@
 #!/bin/bash
-# pre-commit for a terraform repository
 
-echo "START: .git/hooks/pre-commit"
 #### exit if nothing changed ####
 if [[ $(git status -s | wc -l) -eq 0 ]]
 then
 	exit 0
 fi
 
+#### FUNCTIONS ####
+log(){
+  entry="$*"
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S')]: INFO: ${entry}" >&2
+}
+
+err() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S')]: ERROR: $*" >&2
+}
+
+go_test() {
+	if [[ -z $2 ]]; then
+		err "no variable supplied to go_test"
+		log "USAGE: go_test [string] [my_test.go]"
+		return 1
+	fi
+	match="$1"
+	file="$2"
+
+	if [[ "$modules" =~ "$match" ]]; then
+		log "go test: $file"
+		if ! go test -v "$file"; then
+			err "terratest returned with non-zero status from: go test -v $file"
+			exit 1
+		fi
+	fi
+}
+
 function terraformDoc() {
-	find ./ -type d | egrep -v "\.terraform|gitcrypt|\.git|test" | egrep "example|module|live" | while read line; 
+	# TODO: find a more accurate way to find directories, current method includes undesired dirs
+	find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git|test" | grep -E "example|module|live" | while read -r line; 
 	do
-		result=$(terraform-docs markdown --output-file "README.md" --output-check "$line")
-		if [[ $(echo $?) -ne 0 ]]
-		then
-			echo "update: ${line}/README.md"
-			echo ""
-			echo ""
-			terraform-docs markdown --output-file "README.md" "$line" 
+		if ! terraform-docs markdown --output-file "README.md" --output-check "$line" 2>1 >/dev/null; then
+			output=$(terraform-docs markdown --output-file 'README.md' "$line")
+			log "$output"
 			git add "${line}/README.md"
 		fi
 	done
 	return 0
 }
 
-
 function terraformFmt() {
-	find ./ -type d | egrep -v "\.terraform|gitcrypt|\.git" | while read line; 
+	find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git" | while read -r line; 
 	do
-		terraform fmt "$line"
-		if [[ $? -ne 0 ]]
-		then
-			echo "INFO: terraformFmt return != 0"
+		if ! terraform fmt "$line"; then 
+			err "terraformFmt return != 0"
 			return 1
 		fi
 	done
@@ -40,146 +60,86 @@ function terraformFmt() {
 
 function terraformValidate() {
 	here=$(pwd)
-	for i in $array;
+	for subdirectory in $array;
 	do
-		cd "${here}/${i}"
-		terraform validate "${here}/$i"
-		if [[ $? -ne 0 ]]
-		then
-			echo 
-			echo "ERROR: $i = INVALID terraform"
-			echo 
+		cd "${here}/${subdirectory}" || return 1
+		if ! terraform validate "${here}/$subdirectory" > /dev/null; then 
+			err "command='terraform validate', result=invalid, dir=${subdirectory}"
 			return 1
 		else 
-			echo "INFO: $i = valid"
+			log "command='terraform validate', result=valid, dir=${subdirectory}"
 		fi
 	done
-	cd $here
+	cd "$here" || return 1
 	return 0
 }
 
+
+#### MAIN ####
+log "START .git/hooks/pre-commit"
+
 #### build array of paths to modules or examples which have changed ####
 modules=""
-for file in $(git status -s | cut -b4- | egrep -v "\.terraform|gitcrypt|\.git"|egrep "modules|examples" );
+for file in $(git status -s | cut -b4- | grep -E -v "\.terraform|gitcrypt|\.git"|grep -E "modules|examples" );
 do
-	directory="$(dirname $file) "
-	if [[ $modules =~ "${directory}" ]]; then
-	echo "$directory is already in modules: $modules"
-	else 
+	directory="$(dirname "$file") "
+	if [[ ! "$modules" =~ "${directory}" ]]; then
 		modules+="$directory "
 	fi
 done
 
 #### build array of paths to modules or examples which have changed. slightly different list than $modules[] ####
 array=""
-for file in $(git status -s | egrep "^M|^A" | cut -b4- | egrep -v "\.terraform|gitcrypt|\.git"|egrep "live/dev|live/stage|examples" | grep -v "access_point" );
+for file in $(git status -s | grep -E "^M|^A" | cut -b4- | grep -E -v "\.terraform|gitcrypt|\.git"| grep -E "live/dev|live/stage|examples" | grep -v "access_point" );
 do
-	directory="$(dirname $file) "
+	directory="$(dirname "$file") "
 	if [[ $array =~ "${directory}" ]]; then
-		echo "$directory is already in array: $array"
+		log "$directory is already in array: $array"
 	else 
 		array+="$directory "
 	fi
 done
 
 
-echo "======= STEP: terraform fmt ======= "
+log "======= STEP: terraform fmt ======= "
 
-		terraformFmt
-		if [[ $? -ne 0 ]]
-		then
-			echo "ERROR: terraform fmt returned with non-zero status"
-			exit 1
-		else 
-			echo "INFO: terraform fmt complete"
-			echo
-		fi
+	if ! terraformFmt; then
+		err "terraform fmt returned with non-zero status"
+		exit 1
+	else 
+		log "terraform fmt complete"
+	fi
 
-echo "======= STEP: terraform doc ======= "
+log "======= STEP: terraform doc ======= "
 
-		terraformDoc
-		echo "INFO: terraform doc complete"
-		echo
+	terraformDoc
+	log "terraform doc complete"
 
-echo "======= STEP: terraform validate ======= "
-		terraformValidate
-		if [[ $? -ne 0 ]]
-		then
-			echo "ERROR: terraform validate returned with non-zero status"
-			exit 1
-		fi
+log "======= STEP: terraform validate ======= "
+	if ! terraformValidate; then
+		err "terraform validate returned with non-zero status"
+		exit 1
+	fi
 
-echo "======= STEP: terratest ======= "
-echo "array=$modules"
+log "======= STEP: terratest ======= "
+log "array=$modules"
 if [[ $modules =~ "modules" ]]; then
-	echo "INFO: modules have changed"
+	log "modules have changed"
 else
 	if [[ $modules =~ "examples" ]]; then
-		echo "INFO: examples have changed"
+		log "examples have changed"
 	else
-		echo "modules have not changed"
+		log "modules have not changed"
 		exit 
 	fi
 fi
 
-cd $(pwd)/test
+cd "$(pwd)/test" || exit
 
-if [[ $modules =~ "alb" ]]; then
-	echo "go test: alb_unit_test.go"
-	go test -v alb_unit_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
+go_test "ecr" ecr_unit_test.go
+go_test "alb" alb_unit_test.go
+go_test "ecs" ecs_cluster_unit_test.go
+go_test "efs" efs_unit_test.go
+go_test "vpc" vpc_unit_test.go
+go_test "certificate" certificate_test.go
 
-if [[ $modules =~ "ecr" ]]; then
-	echo "go test: ecr_unit_test.go"
-	go test -v ecr_unit_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
-
-if [[ $modules =~ "ecs" ]]; then
-	echo "go test: ecs_cluster_unit_test.go"
-	go test -v ecs_cluster_unit_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
-
-if [[ $modules =~ "efs" ]]; then
-	echo "go test: efs_unit_test.go"
-	go test -v efs_unit_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
-
-if [[ $modules =~ "vpc" ]]; then
-	echo "go test: vpc_unit_test.go"
-	go test -v vpc_unit_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
-
-if [[ $modules =~ "certificate" ]]; then
-	echo "go test: certificate_test.go"
-	go test -v certificate_test.go
-	if [[ $? -ne 0 ]]
-	then
-		echo "ERROR: terratest returned with non-zero status"
-		exit 1
-	fi
-fi
