@@ -3,7 +3,7 @@
 #### exit if nothing changed ####
 if [[ $(git status -s | wc -l) -eq 0 ]]
 then
-	exit 0
+  exit 0
 fi
 
 #### FUNCTIONS ####
@@ -17,61 +17,61 @@ err() {
 }
 
 go_test() {
-	if [[ -z $2 ]]; then
-		err "no variable supplied to go_test"
-		log "USAGE: go_test [string] [my_test.go]"
-		return 1
-	fi
-	match="$1"
-	file="$2"
+  if [[ -z $2 ]]; then
+    err "no variable supplied to go_test"
+    log "USAGE: go_test [string] [my_test.go]"
+    return 1
+  fi
+  match="$1"
+  file="$2"
 
-	if [[ "$modules" =~ "$match" ]]; then
-		log "go test: $file"
-		if ! go test -v "$file"; then
-			err "terratest returned with non-zero status from: go test -v $file"
-			exit 1
-		fi
-	fi
+  if [[ "$modules" =~ "$match" ]]; then
+    log "go test: $file"
+    if ! go test -v "$file"; then
+      err "terratest returned with non-zero status from: go test -v $file"
+      exit 1
+    fi
+  fi
 }
 
 function terraformDoc() {
-	# TODO: find a more accurate way to find directories, current method includes undesired dirs
-	find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git|test" | grep -E "example|module|live" | while read -r line; 
-	do
-		if ! terraform-docs markdown --output-file "README.md" --output-check "$line" 2>1 >/dev/null; then
-			output=$(terraform-docs markdown --output-file 'README.md' "$line")
-			log "$output"
-			git add "${line}/README.md"
-		fi
-	done
-	return 0
+  # TODO: find a more accurate way to find directories, current method includes undesired dirs
+  find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git|test" | grep -E "example|module|live" | while read -r line; 
+  do
+    if ! terraform-docs markdown --output-file "README.md" --output-check "$line" 2>1 >/dev/null; then
+      output=$(terraform-docs markdown --output-file 'README.md' "$line")
+      log "$output"
+      git add "${line}/README.md"
+    fi
+  done
+  return 0
 }
 
 function terraformFmt() {
-	find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git" | while read -r line; 
-	do
-		if ! terraform fmt "$line"; then 
-			err "terraformFmt return != 0"
-			return 1
-		fi
-	done
-	return 0
+  find ./ -type d | grep -E -v "\.terraform|gitcrypt|\.git" | while read -r line; 
+  do
+    if ! terraform fmt "$line"; then 
+      err "terraformFmt return != 0"
+      return 1
+    fi
+  done
+  return 0
 }
 
 function terraformValidate() {
-	here=$(pwd)
-	for subdirectory in $array;
-	do
-		cd "${here}/${subdirectory}" || return 1
-		if ! terraform validate "${here}/$subdirectory" > /dev/null; then 
-			err "command='terraform validate', result=invalid, dir=${subdirectory}"
-			return 1
-		else 
-			log "command='terraform validate', result=valid, dir=${subdirectory}"
-		fi
-	done
-	cd "$here" || return 1
-	return 0
+  here=$(pwd)
+  for subdirectory in $array;
+  do
+    cd "${here}/${subdirectory}" || return 1
+    if ! terraform validate "${here}/$subdirectory" > /dev/null; then 
+      err "command='terraform validate', result=invalid, dir=${subdirectory}"
+        return 1
+      else 
+        log "command='terraform validate', result=valid, dir=${subdirectory}"
+      fi
+  done
+  cd "$here" || return 1
+  return 0
 }
 
 
@@ -82,57 +82,59 @@ log "START .git/hooks/pre-commit"
 modules=""
 for file in $(git status -s | cut -b4- | grep -E -v "\.terraform|gitcrypt|\.git"|grep -E "modules|examples" );
 do
-	directory="$(dirname "$file") "
-	if [[ ! "$modules" =~ "${directory}" ]]; then
-		modules+="$directory "
-	fi
+  directory="$(dirname "$file") "
+  if [[ ! "$modules" =~ "${directory}" ]]; then
+    modules+="$directory "
+  fi
 done
 
 #### build array of paths to modules or examples which have changed. slightly different list than $modules[] ####
 array=""
 for file in $(git status -s | grep -E "^M|^A" | cut -b4- | grep -E -v "\.terraform|gitcrypt|\.git"| grep -E "live/dev|live/stage|examples" | grep -v "access_point" );
 do
-	directory="$(dirname "$file") "
-	if [[ $array =~ "${directory}" ]]; then
-		log "$directory is already in array: $array"
-	else 
-		array+="$directory "
-	fi
+  directory="$(dirname "$file") "
+  if [[ $array =~ "${directory}" ]]; then
+    log "$directory is already in array: $array"
+  else 
+    array+="$directory "
+  fi
 done
 
 
 log "======= STEP: terraform fmt ======= "
 
-	if ! terraformFmt; then
-		err "terraform fmt returned with non-zero status"
-		exit 1
-	else 
-		log "terraform fmt complete"
-	fi
+  if ! terraformFmt; then
+    err "terraform fmt returned with non-zero status"
+    exit 1
+  else 
+    log "terraform fmt complete"
+  fi
 
 log "======= STEP: terraform doc ======= "
 
-	terraformDoc
-	log "terraform doc complete"
+  terraformDoc
+  log "terraform doc complete"
 
 log "======= STEP: terraform validate ======= "
-	if ! terraformValidate; then
-		err "terraform validate returned with non-zero status"
-		exit 1
-	fi
+
+  if ! terraformValidate; then
+    err "terraform validate returned with non-zero status"
+    exit 1
+  fi
 
 log "======= STEP: terratest ======= "
-log "array=$modules"
-if [[ $modules =~ "modules" ]]; then
-	log "modules have changed"
-else
-	if [[ $modules =~ "examples" ]]; then
-		log "examples have changed"
-	else
-		log "modules have not changed"
-		exit 
-	fi
-fi
+
+  log "array=$modules"
+  if [[ $modules =~ "modules" ]]; then
+    log "modules have changed"
+  else
+    if [[ $modules =~ "examples" ]]; then
+      log "examples have changed"
+    else
+      log "modules have not changed"
+      exit
+    fi
+  fi
 
 cd "$(pwd)/test" || exit
 
